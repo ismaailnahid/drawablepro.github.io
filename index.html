@@ -130,7 +130,6 @@
       color: #64748b;
     }
 
-    /* Dual upload buttons */
     .dual-upload {
       display: flex;
       gap: 12px;
@@ -211,6 +210,15 @@
       color: #b91c1c;
     }
 
+    .material-btn-success {
+      background: #22c55e;
+      color: white;
+    }
+
+    .material-btn-success:hover {
+      background: #16a34a;
+    }
+
     @media (max-width: 640px) {
       .btn-group {
         gap: 8px;
@@ -223,7 +231,6 @@
       }
     }
 
-    /* Loading Overlay */
     .loading-overlay {
       position: fixed;
       top: 0;
@@ -536,7 +543,6 @@
       }
     }
 
-
     .color-list-standalone {
       max-height: 200px;
       overflow-y: auto;
@@ -589,7 +595,7 @@
           <span class="material-icons">palette</span>
           <div>
             <h2>Standalone Color Processor</h2>
-            <p>Any colors.xml | resolution</p>
+            <p>Any colors.xml | resolution | MIUI Theme Converter</p>
           </div>
         </div>
         <span class="material-icons toggle-icon">expand_more</span>
@@ -600,6 +606,8 @@
               class="material-icons">upload_file</span> Upload XML</button>
           <button class="material-btn material-btn-outline" id="standaloneResolveBtn" disabled><span
               class="material-icons">sync</span> Resolve</button>
+          <button class="material-btn material-btn-success" id="standaloneConvertToMIUIBtn" disabled><span
+              class="material-icons">transform</span> Convert to MIUI</button>
           <button class="material-btn material-btn-outline" id="standaloneDownloadFullBtn" disabled><span
               class="material-icons">download</span> Full File</button>
           <button class="material-btn material-btn-outline" id="standaloneDownloadNonSystemBtn" disabled><span
@@ -715,6 +723,7 @@
     let standaloneColorMap = new Map();
     let standaloneFileName = null;
     let standaloneResolved = false;
+    let standaloneRawContent = null; // Store original raw content for conversion
 
     // ==================== HELPER FUNCTIONS ====================
     function showToast(msg) {
@@ -1120,7 +1129,9 @@
 
     // ==================== STANDALONE PROCESSOR ====================
     function parseStandaloneXml(content) {
-      standaloneColorMap.clear(); standaloneResolved = false;
+      standaloneRawContent = content; // Store original content
+      standaloneColorMap.clear();
+      standaloneResolved = false;
       const regex = /<color\s+name="([^"]+)"\s*>([^<]+)<\/color>/g;
       let m;
       while ((m = regex.exec(content)) !== null) {
@@ -1170,6 +1181,46 @@
       showToast('✅ Relative colors resolved with exact hex values');
     }
 
+    // NEW FUNCTION: Convert to MIUI Theme Format
+    function convertToMIUIFormat() {
+      if (standaloneColorMap.size === 0) {
+        showToast('⚠️ No color data to convert');
+        return;
+      }
+
+      // Build the MIUI format XML
+      let miuiXml = '<?xml version=\'1.0\' encoding=\'UTF-8\'?>\n';
+      miuiXml += '<MIUI_Theme_Values template="DarkTemplate">\n\n';
+
+      // Add all colors
+      for (let [name, data] of standaloneColorMap) {
+        let colorValue;
+        if (standaloneResolved && data.value) {
+          colorValue = data.value;
+        } else if (data.value && !data.isRelative) {
+          colorValue = data.value;
+        } else if (data.original) {
+          colorValue = data.original;
+        } else {
+          colorValue = '#A855F7';
+        }
+
+        // Ensure color value starts with #
+        if (!colorValue.startsWith('#')) {
+          colorValue = '#' + colorValue;
+        }
+
+        miuiXml += `    <color name="${name}">${colorValue}</color>\n`;
+      }
+
+      miuiXml += '\n</MIUI_Theme_Values>';
+
+      // Download the converted file
+      let downloadName = standaloneFileName ? standaloneFileName.replace('.xml', '_MIUI.xml') : 'miui_colors.xml';
+      saveAs(new Blob([miuiXml], { type: 'text/xml' }), downloadName);
+      showToast('✅ Converted to MIUI Theme format successfully!');
+    }
+
     function updateStandaloneUI() {
       let statusDiv = document.getElementById('standaloneStatusBox');
       let total = standaloneColorMap.size, rel = [...standaloneColorMap.values()].filter(c => c.isRelative).length;
@@ -1194,7 +1245,7 @@
     }
 
     function enableStandaloneButtons(enable) {
-      ['standaloneResolveBtn', 'standaloneDownloadFullBtn', 'standaloneDownloadNonSystemBtn', 'standaloneClearBtn'].forEach(id => document.getElementById(id).disabled = !enable);
+      ['standaloneResolveBtn', 'standaloneConvertToMIUIBtn', 'standaloneDownloadFullBtn', 'standaloneDownloadNonSystemBtn', 'standaloneClearBtn'].forEach(id => document.getElementById(id).disabled = !enable);
     }
 
     // ==================== EVENT LISTENERS ====================
@@ -1271,6 +1322,10 @@
       else showToast('⚠️ Only .xml files supported');
     };
     document.getElementById('standaloneResolveBtn').onclick = resolveStandalone;
+
+    // NEW: MIUI Convert button handler
+    document.getElementById('standaloneConvertToMIUIBtn').onclick = convertToMIUIFormat;
+
     document.getElementById('standaloneDownloadFullBtn').onclick = () => {
       if (standaloneColorMap.size === 0) return;
       let xml = '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n';
@@ -1290,14 +1345,13 @@
         xml += `    <color name="${name}">${val}</color>\n`;
       }
       xml += '</resources>';
-      // Use the original filename exactly as is
       let downloadName = standaloneFileName ? standaloneFileName : 'nonsystem_colors.xml';
       saveAs(new Blob([xml], { type: 'text/xml' }), downloadName);
       showToast('✅ Non-system colors downloaded');
     };
 
     document.getElementById('standaloneClearBtn').onclick = () => {
-      standaloneColorMap.clear(); standaloneFileName = null; standaloneResolved = false;
+      standaloneColorMap.clear(); standaloneFileName = null; standaloneResolved = false; standaloneRawContent = null;
       document.getElementById('standaloneStatusBox').innerHTML = '⚠️ No XML file uploaded';
       document.getElementById('standaloneColorListPanel').style.display = 'none';
       enableStandaloneButtons(false);
